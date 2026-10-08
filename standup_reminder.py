@@ -21,9 +21,9 @@ Env vars:
   SLACK_CHANNEL_ID       e.g. C0123ABCD (required — the ID, not the #name)
   TEAM_TZ                IANA zone, default America/Los_Angeles
   MORNING_TIME           HH:MM, default 09:00
-  MEETING_TIME           HH:MM, default 14:15
+  MEETING_TIME           HH:MM, default 15:00
   FOLLOWUP_LEAD_MINUTES  default 60
-  WORKDAYS               comma list of weekday numbers, Mon=0, default 0,1,2,3
+  WORKDAYS               comma list of weekday numbers, Mon=0, default 0,1,2,3,4
   SKIP_DATES             comma list of YYYY-MM-DD (holidays), optional
   BROADCAST_FOLLOWUP     "true" to also show the follow-up in the channel
   CANCEL_LEAD_MINUTES    default 15 (set to 0 to turn the skip notice off)
@@ -210,6 +210,20 @@ def run(client, cfg, now, dry_run=False):
     return "posted: follow-up"
 
 
+def parse_now(raw, tz):
+    """Accept 'YYYY-MM-DD HH:MM' or just 'HH:MM' (today), tolerating quotes and stray spaces."""
+    s = raw.strip().strip("\"'").strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M", "%H:%M"):
+        try:
+            t = dt.datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+        if fmt == "%H:%M":
+            t = dt.datetime.combine(dt.datetime.now(tz).date(), t.time())
+        return t.replace(tzinfo=tz)
+    sys.exit(f'Could not read --now value {raw!r}. Use e.g. 2026-10-08 13:20 or 13:20 (no quotes needed).')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
@@ -219,10 +233,7 @@ def main():
     from slack_sdk import WebClient
 
     cfg = load_config()
-    now = (
-        dt.datetime.strptime(args.now, "%Y-%m-%d %H:%M").replace(tzinfo=cfg["tz"])
-        if args.now else dt.datetime.now(cfg["tz"])
-    )
+    now = parse_now(args.now, cfg["tz"]) if args.now and args.now.strip() else dt.datetime.now(cfg["tz"])
     print(run(WebClient(token=cfg["token"]), cfg, now, dry_run=args.dry_run))
 
 
