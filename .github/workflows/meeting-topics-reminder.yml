@@ -18,7 +18,7 @@ on:
         type: boolean
         default: true
       now:
-        description: 'Pretend it is this Pacific time, e.g. "2026-10-08 13:20" (blank = real time)'
+        description: "Pretend it is this Pacific time, e.g. 13:20 or 2026-10-08 13:20 (blank = now)"
         type: string
         default: ""
 
