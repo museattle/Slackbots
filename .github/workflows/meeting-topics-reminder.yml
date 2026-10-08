@@ -11,7 +11,16 @@ on:
     # in both summer (21 UTC) and winter (22 UTC), so the 2:00–2:15 skip-notice window
     # isn't missed if a scheduled run starts late. Update if MEETING_TIME changes.
     - cron: "0,5,10 21,22 * * 1-4"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log what would be posted, post nothing)"
+        type: boolean
+        default: true
+      now:
+        description: 'Pretend it is this Pacific time, e.g. "2026-10-08 13:20" (blank = real time)'
+        type: string
+        default: ""
 
 concurrency:
   group: meeting-topics-reminder
@@ -27,8 +36,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install slack_sdk
-      - run: python standup_reminder.py
+      - run: |
+          args=()
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          [ -n "$NOW_OVERRIDE" ] && args+=(--now "$NOW_OVERRIDE")
+          python standup_reminder.py "${args[@]}"
         env:
+          DRY_RUN: ${{ inputs.dry_run }}        # empty on scheduled runs → real posting
+          NOW_OVERRIDE: ${{ inputs.now }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
           TEAM_TZ: America/Los_Angeles
