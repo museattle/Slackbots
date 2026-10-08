@@ -2,11 +2,15 @@ name: Meeting topics reminder
 
 on:
   schedule:
-    # Cron here is UTC. Every 15 min, Mon–Fri, 16:00–23:45 UTC, which covers
-    # 9:00 AM–3:45 PM Pacific in summer and 8:00 AM–3:45 PM in winter.
-    # The script decides what's due from local time (TEAM_TZ), so this window only
+    # Cron here is UTC. Every 15 min, Mon–Thu, 16:00–22:45 UTC, which covers
+    # 9:00 AM–3:45 PM Pacific in summer and 8:00 AM–2:45 PM in winter.
+    # The script decides what's due from Pacific time (TEAM_TZ), so this window only
     # needs to span MORNING_TIME through MEETING_TIME. Widen it if you change those.
-    - cron: "*/15 16-23 * * 1-5"
+    - cron: "*/15 16-22 * * 1-4"
+    # Extra checks at :00, :05, :10 of 21:00 and 22:00 UTC, i.e. 2:00–2:10 PM Pacific
+    # in both summer (21 UTC) and winter (22 UTC), so the 2:00–2:15 skip-notice window
+    # isn't missed if a scheduled run starts late. Update if MEETING_TIME changes.
+    - cron: "0,5,10 21,22 * * 1-4"
   workflow_dispatch: {}
 
 concurrency:
@@ -28,8 +32,11 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
           TEAM_TZ: America/Los_Angeles
+          WORKDAYS: "0,1,2,3"     # Mon=0 … Thu=3
           MORNING_TIME: "09:00"
-          MEETING_TIME: "15:00"
+          MEETING_TIME: "14:15"
           FOLLOWUP_LEAD_MINUTES: "60"
           SKIP_DATES: ""          # e.g. "2026-11-26,2026-12-25"
           BROADCAST_FOLLOWUP: "false"
+          CANCEL_LEAD_MINUTES: "15"
+          BROADCAST_CANCEL: "true"   # skip notice also appears in the channel
