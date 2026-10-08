@@ -26,6 +26,7 @@ Env vars:
   WORKDAYS               comma list of weekday numbers, Mon=0, default 0,1,2,3,4
   SKIP_DATES             comma list of YYYY-MM-DD (holidays), optional
   BROADCAST_FOLLOWUP     "true" to also show the follow-up in the channel
+  MEETING_NAME           what messages call the meeting, default StandDown
   CANCEL_LEAD_MINUTES    default 15 (set to 0 to turn the skip notice off)
   BROADCAST_CANCEL       "false" to keep the skip notice in the thread only (default true)
 
@@ -68,6 +69,7 @@ def load_config():
         "workdays": {int(d) for d in env("WORKDAYS", "0,1,2,3,4").split(",") if d.strip()},
         "skip_dates": {d.strip() for d in env("SKIP_DATES", "").split(",") if d.strip()},
         "broadcast": env("BROADCAST_FOLLOWUP", "false").lower() == "true",
+        "name": env("MEETING_NAME", "StandDown"),
         "cancel_lead": int(env("CANCEL_LEAD_MINUTES", "15")),
         "broadcast_cancel": env("BROADCAST_CANCEL", "true").lower() == "true",
     }
@@ -75,34 +77,37 @@ def load_config():
 
 # ---------- messages ----------
 
-def fmt_time(t):
-    return dt.datetime.combine(dt.date.today(), t).strftime("%-I:%M %p")
+def local_time(meeting_at):
+    """Slack date token: each reader sees the time in their own Slack time zone.
+    The text after | is the fallback for notifications/clients that can't render it."""
+    fallback = meeting_at.strftime("%-I:%M %p %Z")
+    return f"<!date^{int(meeting_at.timestamp())}^{{time}}|{fallback}>"
 
 
-def morning_text(cfg):
+def morning_text(cfg, meeting_at):
     return (
         f":wave: Good morning! Reply in this thread with any topics for today's "
-        f"{fmt_time(cfg['meeting'])} meeting."
+        f"{cfg['name']} at {local_time(meeting_at)}."
     )
 
 
-def late_morning_text(cfg):
+def late_morning_text(cfg, meeting_at):
     # Used only if the morning post was missed entirely and we're already in the follow-up window.
     return (
-        f":alarm_clock: Today's meeting is at {fmt_time(cfg['meeting'])}. "
+        f":alarm_clock: Today's {cfg['name']} is at {local_time(meeting_at)}. "
         f"Reply in this thread with any topics you'd like to cover."
     )
 
 
-def followup_text(cfg):
+def followup_text(cfg, meeting_at):
     return (
-        f":alarm_clock: Meeting starts in {cfg['lead']} minutes and no topics have been "
-        f"posted yet. Add anything you'd like to discuss here."
+        f":alarm_clock: {cfg['name']} starts in {cfg['lead']} minutes ({local_time(meeting_at)}) "
+        f"and no topics have been posted yet. Add anything you'd like to discuss here."
     )
 
 
-def cancel_text(cfg):
-    return ":no_entry_sign: We can skip today's meeting since no topics were posted."
+def cancel_text(cfg, meeting_at):
+    return f":no_entry_sign: We can skip today's {cfg['name']} since no topics were posted."
 
 
 # ---------- Slack helpers ----------
@@ -187,7 +192,7 @@ def run(client, cfg, now, dry_run=False):
         if now >= cancel_at:
             # Never asked the team for topics today, so don't cancel on them.
             return "skip: no reminder was posted today; too late to start one"
-        text = morning_text(cfg) if now < followup_at else late_morning_text(cfg)
+        text = morning_text(cfg, meeting_at) if now < followup_at else late_morning_text(cfg, meeting_at)
         post(text, "morning")
         return "posted: morning reminder"
 
@@ -201,12 +206,12 @@ def run(client, cfg, now, dry_run=False):
     if now >= cancel_at:
         if "cancel" in ours:
             return "skip: skip notice already posted"
-        post(cancel_text(cfg), "cancel", thread_ts=root["ts"], broadcast=cfg["broadcast_cancel"])
+        post(cancel_text(cfg, meeting_at),"cancel", thread_ts=root["ts"], broadcast=cfg["broadcast_cancel"])
         return "posted: skip-meeting notice"
 
     if "followup" in ours:
         return "skip: follow-up already posted"
-    post(followup_text(cfg), "followup", thread_ts=root["ts"], broadcast=cfg["broadcast"])
+    post(followup_text(cfg, meeting_at),"followup", thread_ts=root["ts"], broadcast=cfg["broadcast"])
     return "posted: follow-up"
 
 
@@ -234,7 +239,10 @@ def main():
 
     cfg = load_config()
     now = parse_now(args.now, cfg["tz"]) if args.now and args.now.strip() else dt.datetime.now(cfg["tz"])
-    print(run(WebClient(token=cfg["token"]), cfg, now, dry_run=args.dry_run))
+    result = run(WebClient(token=cfg["token"]), cfg, now, dry_run=args.dry_run)
+    if args.dry_run:
+        result = result.replace("posted:", "would post:") + "  (dry run — nothing sent)"
+    print(result)
 
 
 if __name__ == "__main__":
