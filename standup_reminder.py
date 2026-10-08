@@ -27,6 +27,7 @@ Env vars:
   SKIP_DATES             comma list of YYYY-MM-DD (holidays), optional
   BROADCAST_FOLLOWUP     "true" to also show the follow-up in the channel
   MEETING_NAME           what messages call the meeting, default StandDown
+  MENTION_GROUP_ID       user-group ID (S…) to @mention in the morning post, optional
   CANCEL_LEAD_MINUTES    default 15 (set to 0 to turn the skip notice off)
   BROADCAST_CANCEL       "false" to keep the skip notice in the thread only (default true)
 
@@ -70,6 +71,7 @@ def load_config():
         "skip_dates": {d.strip() for d in env("SKIP_DATES", "").split(",") if d.strip()},
         "broadcast": env("BROADCAST_FOLLOWUP", "false").lower() == "true",
         "name": env("MEETING_NAME", "StandDown"),
+        "mention_group": (env("MENTION_GROUP_ID", "") or "").strip(),
         "cancel_lead": int(env("CANCEL_LEAD_MINUTES", "15")),
         "broadcast_cancel": env("BROADCAST_CANCEL", "true").lower() == "true",
     }
@@ -84,9 +86,15 @@ def local_time(meeting_at):
     return f"<!date^{int(meeting_at.timestamp())}^{{time}}|{fallback}>"
 
 
+def mention(cfg):
+    """User-group mention, e.g. <!subteam^S0123ABCD>, which notifies the group. Empty if not set."""
+    gid = cfg["mention_group"]
+    return f"<!subteam^{gid}> " if gid else ""
+
+
 def morning_text(cfg, meeting_at):
     return (
-        f":wave: Good morning! Reply in this thread with any topics for today's "
+        f"{mention(cfg)}:wave: Good morning! Reply in this thread with any topics for today's "
         f"{cfg['name']} at {local_time(meeting_at)}."
     )
 
@@ -94,7 +102,7 @@ def morning_text(cfg, meeting_at):
 def late_morning_text(cfg, meeting_at):
     # Used only if the morning post was missed entirely and we're already in the follow-up window.
     return (
-        f":alarm_clock: Today's {cfg['name']} is at {local_time(meeting_at)}. "
+        f"{mention(cfg)}:alarm_clock: Today's {cfg['name']} is at {local_time(meeting_at)}. "
         f"Reply in this thread with any topics you'd like to cover."
     )
 
