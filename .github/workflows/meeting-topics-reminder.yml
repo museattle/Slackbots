@@ -1,0 +1,35 @@
+name: Meeting topics reminder
+
+on:
+  schedule:
+    # Cron here is UTC. Every 15 min, Mon–Fri, 16:00–23:45 UTC, which covers
+    # 9:00 AM–3:45 PM Pacific in summer and 8:00 AM–3:45 PM in winter.
+    # The script decides what's due from local time (TEAM_TZ), so this window only
+    # needs to span MORNING_TIME through MEETING_TIME. Widen it if you change those.
+    - cron: "*/15 16-23 * * 1-5"
+  workflow_dispatch: {}
+
+concurrency:
+  group: meeting-topics-reminder
+  cancel-in-progress: false
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install slack_sdk
+      - run: python standup_reminder.py
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
+          TEAM_TZ: America/Los_Angeles
+          MORNING_TIME: "09:00"
+          MEETING_TIME: "15:00"
+          FOLLOWUP_LEAD_MINUTES: "60"
+          SKIP_DATES: ""          # e.g. "2026-11-26,2026-12-25"
+          BROADCAST_FOLLOWUP: "false"
