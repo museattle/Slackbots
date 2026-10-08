@@ -7,9 +7,12 @@ the current local time and does whatever is due, so it's safe to run often and
 tolerant of late/skipped cron runs:
 
   * After MORNING_TIME: if today's reminder hasn't been posted yet, post it.
-  * In the window [MEETING_TIME - FOLLOWUP_LEAD_MINUTES, MEETING_TIME):
+  * In the window [MEETING_TIME - FOLLOWUP_LEAD_MINUTES, MEETING_TIME - CANCEL_LEAD_MINUTES):
       if nobody has replied in the reminder thread and no follow-up has been
       posted yet, post a follow-up reply in the same thread.
+  * In the window [MEETING_TIME - CANCEL_LEAD_MINUTES, MEETING_TIME):
+      if still nobody has replied, post a "we can skip today's meeting" reply
+      in the same thread (also shown in the channel by default).
 
 State is kept in Slack itself (via message metadata), so there's no database.
 
@@ -18,11 +21,13 @@ Env vars:
   SLACK_CHANNEL_ID       e.g. C0123ABCD (required — the ID, not the #name)
   TEAM_TZ                IANA zone, default America/Los_Angeles
   MORNING_TIME           HH:MM, default 09:00
-  MEETING_TIME           HH:MM, default 15:00
+  MEETING_TIME           HH:MM, default 14:15
   FOLLOWUP_LEAD_MINUTES  default 60
-  WORKDAYS               comma list of weekday numbers, Mon=0, default 0,1,2,3,4
+  WORKDAYS               comma list of weekday numbers, Mon=0, default 0,1,2,3
   SKIP_DATES             comma list of YYYY-MM-DD (holidays), optional
   BROADCAST_FOLLOWUP     "true" to also show the follow-up in the channel
+  CANCEL_LEAD_MINUTES    default 15 (set to 0 to turn the skip notice off)
+  BROADCAST_CANCEL       "false" to keep the skip notice in the thread only (default true)
 
 CLI:
   --dry-run              print what would be posted, don't post
@@ -63,6 +68,8 @@ def load_config():
         "workdays": {int(d) for d in env("WORKDAYS", "0,1,2,3,4").split(",") if d.strip()},
         "skip_dates": {d.strip() for d in env("SKIP_DATES", "").split(",") if d.strip()},
         "broadcast": env("BROADCAST_FOLLOWUP", "false").lower() == "true",
+        "cancel_lead": int(env("CANCEL_LEAD_MINUTES", "15")),
+        "broadcast_cancel": env("BROADCAST_CANCEL", "true").lower() == "true",
     }
 
 
@@ -94,6 +101,10 @@ def followup_text(cfg):
     )
 
 
+def cancel_text(cfg):
+    return ":no_entry_sign: We can skip today's meeting since no topics were posted."
+
+
 # ---------- Slack helpers ----------
 
 def metadata(kind, date_str):
@@ -122,8 +133,8 @@ def find_root(client, channel, since_ts, date_str):
 
 
 def thread_status(client, channel, root_ts, date_str):
-    """Return (human_reply_count, followup_already_posted)."""
-    humans, followed_up, cursor = 0, False, None
+    """Return (human_reply_count, set of our reply kinds already posted)."""
+    humans, ours, cursor = 0, set(), None
     while True:
         resp = client.conversations_replies(
             channel=channel, ts=root_ts, include_all_metadata=True, limit=200, cursor=cursor,
@@ -131,13 +142,14 @@ def thread_status(client, channel, root_ts, date_str):
         for m in resp["messages"]:
             if m.get("ts") == root_ts:
                 continue
-            if is_ours(m, "followup", date_str):
-                followed_up = True
-            elif not m.get("bot_id") and not m.get("subtype"):
+            kind = next((k for k in ("followup", "cancel") if is_ours(m, k, date_str)), None)
+            if kind:
+                ours.add(kind)
+            elif not m.get("bot_id") and m.get("subtype") in (None, "thread_broadcast"):
                 humans += 1
         cursor = (resp.get("response_metadata") or {}).get("next_cursor")
         if not cursor:
-            return humans, followed_up
+            return humans, ours
 
 
 # ---------- core logic ----------
@@ -152,6 +164,7 @@ def run(client, cfg, now, dry_run=False):
     morning_at = dt.datetime.combine(now.date(), cfg["morning"], tz)
     meeting_at = dt.datetime.combine(now.date(), cfg["meeting"], tz)
     followup_at = meeting_at - dt.timedelta(minutes=cfg["lead"])
+    cancel_at = meeting_at - dt.timedelta(minutes=cfg["cancel_lead"]) if cfg["cancel_lead"] > 0 else meeting_at
     day_start = dt.datetime.combine(now.date(), dt.time(0, 0), tz)
 
     if now < morning_at or now >= meeting_at:
@@ -171,6 +184,9 @@ def run(client, cfg, now, dry_run=False):
     root = find_root(client, cfg["channel"], day_start.timestamp(), date_str)
 
     if root is None:
+        if now >= cancel_at:
+            # Never asked the team for topics today, so don't cancel on them.
+            return "skip: no reminder was posted today; too late to start one"
         text = morning_text(cfg) if now < followup_at else late_morning_text(cfg)
         post(text, "morning")
         return "posted: morning reminder"
@@ -178,12 +194,18 @@ def run(client, cfg, now, dry_run=False):
     if now < followup_at:
         return "skip: morning already posted, follow-up not due"
 
-    humans, followed_up = thread_status(client, cfg["channel"], root["ts"], date_str)
+    humans, ours = thread_status(client, cfg["channel"], root["ts"], date_str)
     if humans > 0:
         return f"skip: {humans} topic repl{'y' if humans == 1 else 'ies'} already"
-    if followed_up:
-        return "skip: follow-up already posted"
 
+    if now >= cancel_at:
+        if "cancel" in ours:
+            return "skip: skip notice already posted"
+        post(cancel_text(cfg), "cancel", thread_ts=root["ts"], broadcast=cfg["broadcast_cancel"])
+        return "posted: skip-meeting notice"
+
+    if "followup" in ours:
+        return "skip: follow-up already posted"
     post(followup_text(cfg), "followup", thread_ts=root["ts"], broadcast=cfg["broadcast"])
     return "posted: follow-up"
 
