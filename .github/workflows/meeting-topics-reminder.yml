@@ -51,6 +51,7 @@ jobs:
           MORNING_TIME: "09:00"
           MEETING_TIME: "14:15"
           MEETING_NAME: "StandDown"
+          MENTION_GROUP_ID: ${{ vars.MENTION_GROUP_ID }}   # @yoda-engineers group ID (S…)
           FOLLOWUP_LEAD_MINUTES: "60"
           SKIP_DATES: ""          # e.g. "2026-11-26,2026-12-25"
           BROADCAST_FOLLOWUP: "false"
