@@ -49,7 +49,7 @@ jobs:
           TEAM_TZ: America/Los_Angeles
           WORKDAYS: "0,1,2,3"     # Mon=0 … Thu=3
           MORNING_TIME: "09:00"
-          MEETING_TIME: "14:15"
+          MEETING_TIME: "13:15"
           MEETING_NAME: "StandDown"
           MENTION_GROUP_ID: ${{ vars.MENTION_GROUP_ID }}   # @yoda-engineers group ID (S…)
           FOLLOWUP_LEAD_MINUTES: "60"
